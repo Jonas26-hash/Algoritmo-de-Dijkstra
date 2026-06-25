@@ -1,4 +1,4 @@
-import type { ToolMode, GraphNode, DijkstraResult } from '../types/graph';
+import type { ToolMode, GraphNode, DijkstraResult, AlgorithmMethod } from '../types/graph';
 
 const GRAPH_PRESETS = [
   'Guía original (7 nodos)',
@@ -8,6 +8,7 @@ const GRAPH_PRESETS = [
   'Dos componentes (6 nodos)',
   'Camino largo (8 nodos)',
   'Pesos altos (5 nodos)',
+  'Pesos negativos (4 nodos)',
 ];
 
 interface ToolbarProps {
@@ -30,6 +31,9 @@ interface ToolbarProps {
   canStep: boolean;
   isStepping: boolean;
   selectedPreset: number;
+  method: AlgorithmMethod;
+  onMethodChange: (m: AlgorithmMethod) => void;
+  onCompare: () => void;
 }
 
 export default function Toolbar({
@@ -39,7 +43,7 @@ export default function Toolbar({
   showMatrix, setShowMatrix,
   dijkstraResult,
   stepMode, setStepMode, onNextStep, canStep, isStepping,
-  selectedPreset,
+  selectedPreset, method, onMethodChange, onCompare,
 }: ToolbarProps) {
   const modes: { key: ToolMode; label: string; icon: string }[] = [
     { key: 'node', label: 'Nodo', icon: '⬤' },
@@ -96,18 +100,36 @@ export default function Toolbar({
       </div>
 
       <div className="toolbar-section">
+        <span className="toolbar-label">Algoritmo</span>
+        <div className="method-buttons">
+          <button
+            className={`method-btn ${method === 'dijkstra' ? 'active' : ''}`}
+            onClick={() => onMethodChange('dijkstra')}
+          >
+            Dijkstra
+          </button>
+          <button
+            className={`method-btn ${method === 'floyd' ? 'active' : ''}`}
+            onClick={() => onMethodChange('floyd')}
+          >
+            Floyd‑Warshall
+          </button>
+        </div>
+      </div>
+
+      <div className="toolbar-section">
         <div className="run-buttons">
           <button
             className="btn btn-primary"
             onClick={onRunDijkstra}
-            disabled={!startNodeId || nodes.length === 0}
+            disabled={method === 'floyd' ? nodes.length === 0 : !startNodeId || nodes.length === 0}
           >
-            ▶ Dijkstra
+            ▶ {method === 'floyd' ? 'Floyd‑Warshall' : 'Dijkstra'}
           </button>
           <button
             className={`btn btn-secondary ${stepMode ? 'active' : ''}`}
             onClick={() => setStepMode(!stepMode)}
-            disabled={!startNodeId || nodes.length === 0}
+            disabled={!startNodeId || nodes.length === 0 || method === 'floyd'}
           >
             {stepMode ? '⏹ Normal' : '⏭ Paso a paso'}
           </button>
@@ -121,6 +143,14 @@ export default function Toolbar({
             </button>
           )}
         </div>
+        <button
+          className="btn btn-secondary"
+          onClick={onCompare}
+          disabled={!startNodeId || nodes.length === 0}
+          style={{ width: '100%', marginTop: 4 }}
+        >
+          ⚖ Comparar ambos
+        </button>
       </div>
 
       <div className="toolbar-section">

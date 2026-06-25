@@ -16,6 +16,11 @@ export interface DijkstraResult {
   paths: Record<string, string[]>;
 }
 
+export interface FloydWarshallResult {
+  distances: Record<string, Record<string, number>>;
+  next: Record<string, Record<string, string | null>>;
+}
+
 export interface DijkstraStep {
   current: string | null;
   distances: Record<string, number>;
@@ -26,3 +31,4 @@ export interface DijkstraStep {
 }
 
 export type ToolMode = 'node' | 'edge' | 'select' | 'delete';
+export type AlgorithmMethod = 'dijkstra' | 'floyd';

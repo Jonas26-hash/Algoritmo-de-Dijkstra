@@ -4,7 +4,7 @@ Simulador visual del algoritmo de Dijkstra para encontrar la ruta más corta en 
 
 ## 🚀 Demo
 
-[https://algoritmo-dijkstra.vercel.app](https://algoritmo-de-dijkstra.vercel.app/)
+[https://algoritmo-de-dijkstra.vercel.app](https://algoritmo-de-dijkstra.vercel.app)
 
 ## 📖 Cómo usar
 

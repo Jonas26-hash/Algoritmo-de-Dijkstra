@@ -1,6 +1,7 @@
-import { useState, useCallback, useRef } from 'react';
-import type { GraphNode, GraphEdge, ToolMode, DijkstraResult, DijkstraStep } from './types/graph';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import type { GraphNode, GraphEdge, ToolMode, DijkstraResult, DijkstraStep, AlgorithmMethod, FloydWarshallResult } from './types/graph';
 import { dijkstra, dijkstraStepByStep } from './algorithm/dijkstra';
+import { floydWarshall, getFloydPath } from './algorithm/floydWarshall';
 import { findAllSimplePaths } from './algorithm/paths';
 import type { SimplePath } from './algorithm/paths';
 import GraphCanvas from './components/GraphCanvas';
@@ -159,6 +160,23 @@ const GRAPH_PRESETS: { name: string; nodes: GraphNode[]; edges: GraphEdge[]; sta
     ],
     startId: '1',
   },
+  {
+    name: 'Pesos negativos (4 nodos)',
+    nodes: [
+      { id: '1', label: 'A', x: 80, y: 200 },
+      { id: '2', label: 'B', x: 250, y: 100 },
+      { id: '3', label: 'C', x: 250, y: 340 },
+      { id: '4', label: 'D', x: 450, y: 220 },
+    ],
+    edges: [
+      { from: '1', to: '2', weight: 4 },
+      { from: '1', to: '3', weight: 2 },
+      { from: '2', to: '3', weight: -3 },
+      { from: '2', to: '4', weight: 2 },
+      { from: '3', to: '4', weight: 1 },
+    ],
+    startId: '1',
+  },
 ];
 
 function createNode(x: number, y: number): GraphNode {
@@ -188,10 +206,19 @@ export default function App() {
   const [showMatrix, setShowMatrix] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState(0);
   const [darkMode, setDarkMode] = useState(false);
+  const [method, setMethod] = useState<AlgorithmMethod>('dijkstra');
+  const [floydResult, setFloydResult] = useState<FloydWarshallResult | null>(null);
   const [destinationId, setDestinationId] = useState<string | null>(null);
   const [destinationWarning, setDestinationWarning] = useState<string | null>(null);
   const [destinationPaths, setDestinationPaths] = useState<SimplePath[] | null>(null);
   const warnTimeoutRef = useRef<number>(0);
+  const [comparison, setComparison] = useState<{
+    dijkstraResult: DijkstraResult;
+    floydResult: FloydWarshallResult;
+    startNodeId: string;
+  } | null>(null);
+
+  const floydComputedRef = useRef(false);
 
   const toggleTheme = useCallback(() => {
     setDarkMode(prev => !prev);
@@ -205,6 +232,7 @@ export default function App() {
     const newNode = createNode(x, y);
     setNodes(prev => [...prev, newNode]);
     setDijkstraResult(null);
+    setFloydResult(null);
     setStepState(null);
     stepIteratorRef.current = null;
   }, []);
@@ -244,6 +272,7 @@ export default function App() {
     setEdges(prev => [...prev, { from: fromId, to: toId, weight }]);
     setWeightDialog(prev => ({ ...prev, open: false }));
     setDijkstraResult(null);
+    setFloydResult(null);
     setStepState(null);
     stepIteratorRef.current = null;
   }, [weightDialog]);
@@ -262,6 +291,7 @@ export default function App() {
     if (startNodeId === id) setStartNodeId(null);
     if (destinationId === id) setDestinationId(null);
     setDijkstraResult(null);
+    setFloydResult(null);
     setStepState(null);
     stepIteratorRef.current = null;
   }, [startNodeId]);
@@ -269,6 +299,7 @@ export default function App() {
   const deleteEdge = useCallback((from: string, to: string) => {
     setEdges(prev => prev.filter(e => !(e.from === from && e.to === to)));
     setDijkstraResult(null);
+    setFloydResult(null);
     setStepState(null);
     stepIteratorRef.current = null;
   }, []);
@@ -283,20 +314,60 @@ export default function App() {
     setStartNodeId(preset.startId);
     setSelectedPreset(idx);
     setDijkstraResult(null);
+    setFloydResult(null);
     setStepState(null);
     stepIteratorRef.current = null;
+    floydComputedRef.current = false;
     setMode('select');
     setShowMatrix(true);
     setDestinationId(null);
     setDestinationWarning(null);
     setDestinationPaths(null);
+    setComparison(null);
   }, [selectedPreset]);
 
   const runDijkstra = useCallback(() => {
-    if (!startNodeId || nodes.length === 0) return;
+    if (nodes.length === 0) return;
+    if (method !== 'floyd' && !startNodeId) return;
+
+    if (method === 'floyd') {
+      const effectiveStart = startNodeId || nodes[0].id;
+      const fw = floydWarshall(nodes, edges);
+      setFloydResult(fw);
+      const distances = fw.distances[effectiveStart] ?? {};
+      const paths: Record<string, string[]> = {};
+      for (const id of nodes.map(n => n.id)) {
+        const p = getFloydPath(fw.next, effectiveStart, id);
+        paths[id] = p.length > 0 ? p : [effectiveStart, id];
+      }
+      const dijkResult: DijkstraResult = { distances, paths };
+      setDijkstraResult(dijkResult);
+      if (!startNodeId) setStartNodeId(effectiveStart);
+      setStepState(null);
+      stepIteratorRef.current = null;
+      floydComputedRef.current = true;
+
+      if (destinationId) {
+        const d = dijkResult.distances[destinationId];
+        if (d === undefined || d === Infinity) {
+          const msg = `No hay camino de ${getNodeLabel(effectiveStart)} a ${getNodeLabel(destinationId)}`;
+          setDestinationWarning(msg);
+          clearTimeout(warnTimeoutRef.current);
+          warnTimeoutRef.current = window.setTimeout(() => setDestinationWarning(null), 4000);
+          setDestinationPaths(null);
+        } else {
+          const p = getFloydPath(fw.next, effectiveStart, destinationId);
+          setDestinationPaths(p.length > 0 ? [{ path: p, totalWeight: d }] : []);
+          setDestinationWarning(null);
+        }
+      } else {
+        setDestinationPaths(null);
+      }
+      return;
+    }
 
     if (stepMode) {
-      const iterator = dijkstraStepByStep(nodes, edges, startNodeId);
+      const iterator = dijkstraStepByStep(nodes, edges, startNodeId!);
       stepIteratorRef.current = iterator;
       setIsStepping(true);
       const first = iterator.next();
@@ -305,28 +376,30 @@ export default function App() {
       }
       setIsStepping(false);
       setDijkstraResult(null);
+      setFloydResult(null);
     } else {
-      const result = dijkstra(nodes, edges, startNodeId);
+      const result = dijkstra(nodes, edges, startNodeId!);
       setDijkstraResult(result);
+      setFloydResult(null);
       setStepState(null);
       stepIteratorRef.current = null;
 
       if (destinationId) {
         if (result.distances[destinationId] === Infinity) {
-          const msg = `No hay camino de ${getNodeLabel(startNodeId)} a ${getNodeLabel(destinationId)}`;
+          const msg = `No hay camino de ${getNodeLabel(startNodeId!)} a ${getNodeLabel(destinationId)}`;
           setDestinationWarning(msg);
           clearTimeout(warnTimeoutRef.current);
           warnTimeoutRef.current = window.setTimeout(() => setDestinationWarning(null), 4000);
           setDestinationPaths(null);
         } else {
-          setDestinationPaths(findAllSimplePaths(nodes, edges, startNodeId, destinationId));
+          setDestinationPaths(findAllSimplePaths(nodes, edges, startNodeId!, destinationId));
           setDestinationWarning(null);
         }
       } else {
         setDestinationPaths(null);
       }
     }
-  }, [startNodeId, nodes, edges, stepMode, destinationId, getNodeLabel]);
+  }, [startNodeId, nodes, edges, stepMode, destinationId, getNodeLabel, method]);
 
   const nextStep = useCallback(() => {
     if (!stepIteratorRef.current) return;
@@ -350,15 +423,75 @@ export default function App() {
     setEdges([]);
     setStartNodeId(null);
     setDijkstraResult(null);
+    setFloydResult(null);
     setSelectedEdgeSource(null);
     setStepState(null);
     stepIteratorRef.current = null;
+    floydComputedRef.current = false;
     nodeCounter = 0;
     setShowMatrix(false);
     setDestinationId(null);
     setDestinationWarning(null);
     setDestinationPaths(null);
+    setComparison(null);
   }, []);
+
+  // Re-filter Floyd results when startNodeId changes (no recalculation)
+  useEffect(() => {
+    if (method !== 'floyd' || !floydResult || !startNodeId || nodes.length === 0) return;
+    if (!floydComputedRef.current) return;
+    const distances = floydResult.distances[startNodeId] ?? {};
+    const paths: Record<string, string[]> = {};
+    for (const id of nodes.map(n => n.id)) {
+      const p = getFloydPath(floydResult.next, startNodeId, id);
+      paths[id] = p.length > 0 ? p : [startNodeId, id];
+    }
+    setDijkstraResult({ distances, paths });
+
+    if (destinationId) {
+      const d = distances[destinationId];
+      if (d === undefined || d === Infinity) {
+        setDestinationPaths(null);
+      } else {
+        const p = getFloydPath(floydResult.next, startNodeId, destinationId);
+        setDestinationPaths(p.length > 0 ? [{ path: p, totalWeight: d }] : []);
+        setDestinationWarning(null);
+      }
+    }
+  }, [method, floydResult, startNodeId, nodes, destinationId]);
+
+  const onCompare = useCallback(() => {
+    if (!startNodeId || nodes.length === 0) return;
+    const dijk = dijkstra(nodes, edges, startNodeId);
+    const fw = floydWarshall(nodes, edges);
+    setFloydResult(fw);
+    setComparison({ dijkstraResult: dijk, floydResult: fw, startNodeId });
+    // Show Floyd results for this start node
+    const distances = fw.distances[startNodeId] ?? {};
+    const paths: Record<string, string[]> = {};
+    for (const id of nodes.map(n => n.id)) {
+      const p = getFloydPath(fw.next, startNodeId, id);
+      paths[id] = p.length > 0 ? p : [startNodeId, id];
+    }
+    setDijkstraResult({ distances, paths });
+    setMethod('floyd');
+    setStepMode(false);
+    stepIteratorRef.current = null;
+    setStepState(null);
+    floydComputedRef.current = true;
+    if (destinationId) {
+      const d = distances[destinationId];
+      if (!d || d === Infinity) {
+        setDestinationPaths(null);
+      } else {
+        const p = getFloydPath(fw.next, startNodeId, destinationId);
+        setDestinationPaths(p.length > 0 ? [{ path: p, totalWeight: d }] : []);
+        setDestinationWarning(null);
+      }
+    } else {
+      setDestinationPaths(null);
+    }
+  }, [startNodeId, nodes, edges, destinationId, getNodeLabel]);
 
   const stepCanvasState = stepState ? {
     current: stepState.current,
@@ -408,6 +541,16 @@ export default function App() {
             canStep={canStep}
             isStepping={isStepping}
             selectedPreset={selectedPreset}
+            method={method}
+            onMethodChange={(m) => {
+              setMethod(m);
+              if (m === 'floyd') {
+                setStepMode(false);
+                stepIteratorRef.current = null;
+                setStepState(null);
+              }
+            }}
+            onCompare={onCompare}
           />
 
           {nodes.length === 0 && !showMatrix && (
@@ -453,6 +596,9 @@ export default function App() {
             startNodeId={startNodeId}
             destinationId={destinationId}
             destinationPaths={destinationPaths}
+            method={method}
+            floydResult={floydResult}
+            comparison={comparison}
           />
         </aside>
 
